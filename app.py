@@ -7,7 +7,7 @@ import os
 
 app = FastAPI()
 
-model = whisper.load_model("base")
+model = whisper.load_model("tiny")
 kks = pykakasi.kakasi()
 
 def to_hiragana(text):
