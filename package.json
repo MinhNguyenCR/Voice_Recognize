@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "fs": "^0.0.1-security",
+    "mic": "^2.1.2",
+    "openai": "^6.32.0"
+  }
+}
