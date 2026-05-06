@@ -2,12 +2,14 @@ import os
 import re
 import shutil
 import unicodedata
+from typing import List, Optional
 
 import whisper
 import pykakasi
 from Levenshtein import ratio
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -95,3 +97,26 @@ async def assess(
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+# ===== Furigana =====
+
+class FuriganaRequest(BaseModel):
+    text: Optional[str] = None
+    texts: Optional[List[str]] = None
+
+
+def _segment_text(text: str):
+    if not text:
+        return []
+    return [
+        {"orig": item.get("orig", ""), "hira": item.get("hira", "")}
+        for item in kks.convert(text)
+    ]
+
+
+@app.post("/furigana")
+def furigana(req: FuriganaRequest):
+    if req.texts is not None:
+        return {"results": [_segment_text(t) for t in req.texts]}
+    return {"segments": _segment_text(req.text or "")}
