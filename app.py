@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import unicodedata
+from difflib import SequenceMatcher
 from typing import List, Optional
 
 import whisper
@@ -45,6 +46,52 @@ def normalize_for_compare(text: str) -> str:
     return _PUNCT_RE.sub("", hira).lower()
 
 
+def _normalize_segment_hira(hira: str) -> str:
+    return _PUNCT_RE.sub("", unicodedata.normalize("NFKC", hira or "")).lower()
+
+
+def _build_token_matches(target_text: str, user_norm: str):
+    """
+    Tokenize target_text via pykakasi and align it against user_norm
+    (already-normalized hiragana of what the user actually said).
+    Returns [{orig, hira, matched}] in original order.
+    A token is "matched" if at least half of its normalized hiragana
+    characters fall inside an "equal" block from SequenceMatcher.
+    """
+    target_segments = kks.convert(target_text or "")
+
+    target_norm_full = ""
+    seg_ranges = []
+    for seg in target_segments:
+        seg_norm = _normalize_segment_hira(seg.get("hira", ""))
+        start = len(target_norm_full)
+        target_norm_full += seg_norm
+        end = len(target_norm_full)
+        seg_ranges.append((seg, start, end))
+
+    matched = [False] * len(target_norm_full)
+    if target_norm_full and user_norm:
+        matcher = SequenceMatcher(None, target_norm_full, user_norm, autojunk=False)
+        for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+            if tag == "equal":
+                for k in range(i1, i2):
+                    matched[k] = True
+
+    tokens = []
+    for seg, start, end in seg_ranges:
+        if start == end:
+            is_matched = True  # punctuation/whitespace, never fade
+        else:
+            hits = sum(1 for k in range(start, end) if matched[k])
+            is_matched = (hits / (end - start)) >= 0.5
+        tokens.append({
+            "orig": seg.get("orig", ""),
+            "hira": seg.get("hira", ""),
+            "matched": is_matched,
+        })
+    return tokens
+
+
 def assess_pronunciation(audio_path: str, target_text: str) -> dict:
     # initial_prompt giúp Whisper "biết trước" văn bản kỳ vọng
     # → giảm rất nhiều lỗi nhận dạng âm gần giống.
@@ -71,6 +118,7 @@ def assess_pronunciation(audio_path: str, target_text: str) -> dict:
     user_norm = normalize_for_compare(user_text)
 
     score = ratio(target_norm, user_norm) * 100
+    tokens = _build_token_matches(target_text, user_norm)
 
     return {
         "target": target_text,
@@ -78,6 +126,7 @@ def assess_pronunciation(audio_path: str, target_text: str) -> dict:
         "score": round(score, 2),
         "target_hira": target_norm,
         "user_hira": user_norm,
+        "tokens": tokens,
     }
 
 
